@@ -36,11 +36,12 @@ from subprocess import check_call, check_output
 
 import yaml
 from toil.job import Job
+from toil.lib.spark import spawn_spark_cluster
+
+from toil_scripts.adam_uberscript.automated_scaling import SparkMasterAddress
 from toil_scripts.lib import require
 from toil_scripts.lib.programs import docker_call, mock_mode
 from toil_scripts.rnaseq_cgl.rnaseq_cgl_pipeline import generate_file
-from toil_scripts.spark_utils.spawn_cluster import start_spark_hdfs_cluster
-from toil_scripts.tools.spark_tools import call_adam, call_conductor, MasterAddress, HDFS_MASTER_PORT, SPARK_MASTER_PORT
 
 log = logging.getLogger(__name__)
 
@@ -184,7 +185,8 @@ def upload_data(master_ip, inputs, hdfs_name, upload_name, spark_on_toil):
         truncate_file(master_ip, hdfs_name, spark_on_toil)
 
     log.info("Uploading output BAM %s to %s.", hdfs_name, upload_name)
-    call_conductor(master_ip, hdfs_name, upload_name, memory=inputs['memory'])
+    call_conductor(master_ip, inputs, hdfs_name, upload_name)
+    remove_file(master_ip, hdfs_name, spark_on_toil)
 
 
 def download_run_and_upload(job, master_ip, inputs, spark_on_toil):
@@ -217,7 +219,7 @@ def download_run_and_upload(job, master_ip, inputs, spark_on_toil):
         out_file = inputs.output_dir + "/" + sample_name + inputs.suffix + ".bam"
 
         upload_data(master_ip, inputs, adam_output, out_file, spark_on_toil)
-
+        remove_file(master_ip, hdfs_subdir, spark_on_toil)
     except:
         remove_file(master_ip, hdfs_subdir, spark_on_toil)
         raise
@@ -252,15 +254,14 @@ def static_adam_preprocessing_dag(job, inputs, sample, output_dir, suffix=''):
         # Dynamic subclusters, i.e. Spark-on-Toil
         spark_on_toil = True
         cores = multiprocessing.cpu_count()
-        start_cluster = job.wrapJobFn(start_spark_hdfs_cluster,
-                                      inputs.num_nodes-1,
-                                      inputs.memory,
-                                      download_run_and_upload,
-                                      jArgs=(inputs, spark_on_toil),
-                                      jCores=cores,
-                                      jMemory="%s G" %
-                                              inputs.memory).encapsulate()
-        job.addChild(start_cluster)
+        master_ip = spawn_spark_cluster(job,
+                                        False, # Sudo
+                                        inputs.num_nodes-1,
+                                        cores=cores,
+                                        memory=inputs.memory)
+        spark_work = job.wrapJobFn(download_run_and_upload,
+                                   master_ip, inputs, spark_on_toil)
+        job.addChild(spark_work)
 
 
 def scale_external_spark_cluster(num_samples=1):
