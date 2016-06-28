@@ -233,7 +233,7 @@ def static_adam_preprocessing_dag(job, inputs, sample, output_dir, suffix=''):
     inputs.output_dir = output_dir
     inputs.suffix = suffix
 
-    if inputs.master_ip:
+    if inputs.master_ip is not None:
         if inputs.master_ip == 'auto':
             # Static, standalone Spark cluster managed by uberscript
             spark_on_toil = False
@@ -305,7 +305,7 @@ def main():
                             help='Path to the (filled in) config file, generated with "generate-config". '
                                  '\nDefault value: "%(default)s"')
     parser_run.add_argument('--sample', help='The full s3 url of the input SAM or BAM file')
-    parser_run.add_argument('--output-dir', default=None,
+    parser_run.add_argument('--output-dir', required=True, default=None,
                             help='full path where final results will be output')
     parser_run.add_argument('-s', '--suffix', default='',
                             help='Additional suffix to add to the names of the output files')
