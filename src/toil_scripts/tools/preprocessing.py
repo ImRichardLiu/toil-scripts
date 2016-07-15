@@ -83,6 +83,33 @@ def run_samtools_index(job, bam_id):
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bam.bai'))
 
 
+def samtools_view(job, bam_id, flag='0', mock=False):
+    """
+    Outputs bam file using a samtools view flag value
+    :param job: Job instance
+    :param bamFileStoreID str: bam fileStoreID
+    :param flag str: samtools defined flags
+    :param mock bool: If True, run in mock mode
+    :return str: bam fileStoreID
+
+    '0x800'
+    """
+    work_dir = job.fileStore.getLocalTempDir()
+    job.fileStore.readGlobalFile(bam_id, os.path.join(work_dir, 'sample.bam'))
+    outputs = {'sample.output.bam': None},
+    outpath = os.path.join(work_dir, 'sample.output.bam')
+
+    command = ['view',
+               '-b', '-o', '/data/sample.output.bam',
+               '-F', flag,
+               '/data/sample.bam']
+    docker_call(work_dir=work_dir, parameters=command,
+                tool='quay.io/ucsc_cgl/samtools:1.3--256539928ea162949d8a65ca5c79a72ef557ce7c',
+                outputs=outputs,
+                mock=mock)
+    return job.fileStore.writeGlobalFile(outpath)
+
+
 def run_picard_create_sequence_dictionary(job, ref_id, mock=False):
     """
     Use Picard-tools to create reference dictionary
@@ -101,6 +128,73 @@ def run_picard_create_sequence_dictionary(job, ref_id, mock=False):
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e')
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'ref.dict'))
 
+
+def picard_sort_sam(job, bam_id, xmx=8):
+    """
+    Uses picardtools SortSam to sort a sample bam file
+
+    :param job:
+    :param bam_id:
+    :param config:
+    :param xmx:
+    :return:
+    """
+    work_dir = job.fileStore.getLocalTempDir()
+    outputs={'sample.sorted.bam': None, 'sample.sorted.bai': None},
+    job.fileStore.readGlobalFile(bam_id, os.path.join(work_dir, 'sample.bam'))
+    outpath_bam = os.path.join(work_dir, 'sample.sorted.bam')
+    outpath_bai = os.path.join(work_dir, 'sample.sorted.bai')
+
+    #Call: picardtools
+    command = ['SortSam',
+               'INPUT=sample.bam',
+               'OUTPUT=sample.sorted.bam',
+               'SORT_ORDER=coordinate',
+               'CREATE_INDEX=true']
+    docker_call(work_dir=work_dir, parameters=command,
+                env={'JAVA_OPTS':'-Xmx%sg' % xmx},
+                tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
+                outputs=outputs)
+    bam_id = job.fileStore.writeGlobalFile(outpath_bam)
+    bai_id = job.fileStore.writeGlobalFile(outpath_bai)
+    return bam_id, bai_id
+
+
+def picard_mark_duplicates(job, bam_id, bai_id, xmx=8):
+    """
+    Uses picardtools MarkDuplicates
+
+    :param job:
+    :param bam_id:
+    :param bai_id:
+    :param config:
+    :param xmx:
+    :return:
+    """
+    work_dir = job.fileStore.getLocalTempDir()
+    outputs={'sample.mkdups.bam': None, 'sample.mkdups.bai': None}
+    outpath_bam = os.path.join(work_dir, 'sample.mkdups.bam')
+    outpath_bai = os.path.join(work_dir, 'sample.mkdups.bai')
+
+    # Retrieve file path
+    job.fileStore.readGlobalFile(bam_id, os.path.join(work_dir, 'sample.sorted.bam'))
+    job.fileStore.readGlobalFile(bai_id, os.path.join(work_dir, 'sample.sorted.bai'))
+
+    # Call: picardtools
+    command = ['MarkDuplicates',
+               'INPUT=sample.sorted.bam',
+               'OUTPUT=sample.mkdups.bam',
+               'METRICS_FILE=metrics.txt',
+               'ASSUME_SORTED=true',
+               'CREATE_INDEX=true']
+    docker_call(work_dir=work_dir, parameters=command,
+                env={'JAVA_OPTS':'-Xmx%sg' % xmx},
+                tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
+                outputs=outputs)
+
+    bam_id = job.fileStore.writeGlobalFile(outpath_bam)
+    bai_id = job.fileStore.writeGlobalFile(outpath_bai)
+    return bam_id, bai_id
 
 def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, dbsnp, mem='10G', unsafe=False):
     """
@@ -127,6 +221,41 @@ def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mill
     pr = job.wrapJobFn(run_print_reads, cores, br.rv(), ir.rv(0), ir.rv(1), ref, ref_dict, fai, mem, unsafe)
     # Wiring
     job.addChild(rtc)
+    rtc.addChild(ir)
+    ir.addChild(br)
+    br.addChild(pr)
+    return pr.rv(0), pr.rv(1)
+
+
+def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, dbsnp, mem='10G', unsafe=False):
+    """
+    Pre-processing steps for running the GATK Germline pipeline
+
+    :param cores:
+    :param bam:
+    :param bai:
+    :param ref:
+    :param ref_dict:
+    :param fai:
+    :param phase:
+    :param mills:
+    :param dbsnp:
+    :param mem:
+    :param unsafe:
+    :return:
+    """
+    rm_secondary = job.wrapJobFn(samtools_view, bam, '0x800')
+    picard_sort = job.wrapJobFn(picard_sort_sam, rm_secondary.rv())
+    mdups = job.wrapJobFn(picard_mark_duplicates, picard_sort.rv(0), picard_sort.rv(1))
+    rtc = job.wrapJobFn(run_realigner_target_creator, cores, mdups.rv(0), mdups.rv(1), ref, ref_dict, fai, phase, mills, mem, unsafe)
+    ir = job.wrapJobFn(run_indel_realignment, rtc.rv(), bam, bai, ref, ref_dict, fai, phase, mills, mem, unsafe)
+    br = job.wrapJobFn(run_base_recalibration, cores, ir.rv(0), ir.rv(1), ref, ref_dict, fai, dbsnp, mem, unsafe)
+    pr = job.wrapJobFn(run_print_reads, cores, br.rv(), ir.rv(0), ir.rv(1), ref, ref_dict, fai, mem, unsafe)
+    # Wiring
+    job.addChild(rm_secondary)
+    rm_secondary.addChild(picard_sort)
+    picard_sort.addChild(mdups)
+    mdups.addChild(rtc)
     rtc.addChild(ir)
     ir.addChild(br)
     br.addChild(pr)
