@@ -97,7 +97,7 @@ def samtools_view(job, bam_id, flag='0', mock=False):
     """
     work_dir = job.fileStore.getLocalTempDir()
     job.fileStore.readGlobalFile(bam_id, os.path.join(work_dir, 'sample.bam'))
-    outputs = {'sample.output.bam': None},
+    outputs = {'sample.output.bam': None}
     outpath = os.path.join(work_dir, 'sample.output.bam')
 
     cores = multiprocessing.cpu_count()
@@ -134,7 +134,7 @@ def run_picard_create_sequence_dictionary(job, ref_id, mock=False):
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'ref.dict'))
 
 
-def picard_sort_sam(job, bam_id, xmx=8):
+def picard_sort_sam(job, bam_id, xmx='8', mock=False):
     """
     Uses picardtools SortSam to sort a sample bam file
 
@@ -145,7 +145,7 @@ def picard_sort_sam(job, bam_id, xmx=8):
     :return:
     """
     work_dir = job.fileStore.getLocalTempDir()
-    outputs={'sample.sorted.bam': None, 'sample.sorted.bai': None},
+    outputs={'sample.sorted.bam': None, 'sample.sorted.bai': None}
     job.fileStore.readGlobalFile(bam_id, os.path.join(work_dir, 'sample.bam'))
     outpath_bam = os.path.join(work_dir, 'sample.sorted.bam')
     outpath_bai = os.path.join(work_dir, 'sample.sorted.bai')
@@ -157,15 +157,15 @@ def picard_sort_sam(job, bam_id, xmx=8):
                'SORT_ORDER=coordinate',
                'CREATE_INDEX=true']
     docker_call(work_dir=work_dir, parameters=command,
-                env={'JAVA_OPTS':'-Xmx%sg' % xmx.replace('G', '')},
+                env={'JAVA_OPTS':'-Xmx%sg' % xmx},
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
-                outputs=outputs)
+                outputs=outputs, mock=mock)
     bam_id = job.fileStore.writeGlobalFile(outpath_bam)
     bai_id = job.fileStore.writeGlobalFile(outpath_bai)
     return bam_id, bai_id
 
 
-def picard_mark_duplicates(job, bam_id, bai_id, xmx=8):
+def picard_mark_duplicates(job, bam_id, bai_id, xmx='8G', mock=False):
     """
     Uses picardtools MarkDuplicates
 
@@ -193,9 +193,9 @@ def picard_mark_duplicates(job, bam_id, bai_id, xmx=8):
                'ASSUME_SORTED=true',
                'CREATE_INDEX=true']
     docker_call(work_dir=work_dir, parameters=command,
-                env={'JAVA_OPTS':'-Xmx%sg' % xmx},
+                env={'JAVA_OPTS':'-Xmx{}'.format(xmx)},
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
-                outputs=outputs)
+                outputs=outputs, mock=mock)
 
     bam_id = job.fileStore.writeGlobalFile(outpath_bam)
     bai_id = job.fileStore.writeGlobalFile(outpath_bai)
@@ -232,7 +232,8 @@ def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mill
     return pr.rv(0), pr.rv(1)
 
 
-def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, dbsnp, mem='10G', unsafe=False):
+def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, dbsnp,
+                           mem='10G', unsafe=False, mock=False):
     """
     Pre-processing steps for running the GATK Germline pipeline
 
@@ -249,17 +250,17 @@ def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mill
     :param unsafe:
     :return:
     """
-    rm_secondary = job.wrapJobFn(samtools_view, bam, flag='0x800')
-    picard_sort = job.wrapJobFn(picard_sort_sam, rm_secondary.rv(), xmx=mem)
-    mdups = job.wrapJobFn(picard_mark_duplicates, picard_sort.rv(0), picard_sort.rv(1))
+    rm_secondary = job.wrapJobFn(samtools_view, bam, flag='0x800', mock=mock)
+    picard_sort = job.wrapJobFn(picard_sort_sam, rm_secondary.rv(), xmx=mem, mock=mock)
+    mdups = job.wrapJobFn(picard_mark_duplicates, picard_sort.rv(0), picard_sort.rv(1), mock=mock)
     rtc = job.wrapJobFn(run_realigner_target_creator, cores, mdups.rv(0), mdups.rv(1), ref,
-                        ref_dict, fai, phase, mills, mem, unsafe)
+                        ref_dict, fai, phase, mills, mem, unsafe=unsafe, mock=mock)
     ir = job.wrapJobFn(run_indel_realignment, rtc.rv(), bam, bai, ref, ref_dict, fai, phase,
-                       mills, mem, unsafe)
+                       mills, mem, unsafe=unsafe, mock=mock)
     br = job.wrapJobFn(run_base_recalibration, cores, ir.rv(0), ir.rv(1), ref, ref_dict, fai,
-                       dbsnp, mem, unsafe)
+                       dbsnp, mem, unsafe=unsafe, mock=mock)
     pr = job.wrapJobFn(run_print_reads, cores, br.rv(), ir.rv(0), ir.rv(1), ref, ref_dict, fai,
-                       mem, unsafe)
+                       mem, unsafe=unsafe, mock=mock)
     # Wiring
     job.addChild(rm_secondary)
     rm_secondary.addChild(picard_sort)
@@ -271,7 +272,8 @@ def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mill
     return pr.rv(0), pr.rv(1)
 
 
-def run_realigner_target_creator(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, mem, unsafe=False):
+def run_realigner_target_creator(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, mem,
+                                 unsafe=False, mock=False):
     """
     Creates intervals file needed for indel realignment
 
@@ -307,13 +309,14 @@ def run_realigner_target_creator(job, cores, bam, bai, ref, ref_dict, fai, phase
         parameters.extend(['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'])
     docker_call(tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs=inputs,
-                outputs={'sample.intervals': None},
+                outputs={'sample.intervals': None}, mock=mock,
                 work_dir=work_dir, parameters=parameters, env=dict(JAVA_OPTS='-Xmx{}'.format(mem)))
     # Write to fileStore
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.intervals'))
 
 
-def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, phase, mills, mem, unsafe=False):
+def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, phase, mills, mem,
+                          unsafe=False, mock=False):
     """
     Creates realigned bams using the intervals file from previous step
 
@@ -351,7 +354,7 @@ def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, phase, m
     if unsafe:
         parameters.extend(['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'])
     docker_call(tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
-                inputs=inputs,
+                inputs=inputs, mock=mock,
                 outputs={'sample.indel.bam': None, 'sample.indel.bai': None},
                 work_dir=work_dir, parameters=parameters, env=dict(JAVA_OPTS='-Xmx{}'.format(mem)))
     # Write to fileStore
@@ -360,7 +363,8 @@ def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, phase, m
     return indel_bam, indel_bai
 
 
-def run_base_recalibration(job, cores, indel_bam, indel_bai, ref, ref_dict, fai, dbsnp, mem, unsafe=False):
+def run_base_recalibration(job, cores, indel_bam, indel_bai, ref, ref_dict, fai, dbsnp, mem,
+                           unsafe=False, mock=False):
     """
     Creates recal table used in Base Quality Score Recalibration
 
@@ -392,14 +396,15 @@ def run_base_recalibration(job, cores, indel_bam, indel_bai, ref, ref_dict, fai,
     if unsafe:
         parameters.extend(['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'])
     docker_call(tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
-                inputs=inputs,
+                inputs=inputs, mock=mock,
                 outputs={'sample.recal.table': None},
                 work_dir=work_dir, parameters=parameters, env=dict(JAVA_OPTS='-Xmx{}'.format(mem)))
     # Write output to file store
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.recal.table'))
 
 
-def run_print_reads(job, cores, table, indel_bam, indel_bai, ref, ref_dict, fai, mem, unsafe=False):
+def run_print_reads(job, cores, table, indel_bam, indel_bai, ref, ref_dict, fai, mem,
+                    unsafe=False, mock=False):
     """
     Creates BAM that has had the base quality scores recalibrated
 
@@ -433,7 +438,7 @@ def run_print_reads(job, cores, table, indel_bam, indel_bai, ref, ref_dict, fai,
     if unsafe:
         parameters.extend(['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'])
     docker_call(tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
-                inputs=inputs,
+                inputs=inputs, mock=mock,
                 outputs={'sample.bqsr.bam': None, 'sample.bqsr.bai': None},
                 work_dir=work_dir, parameters=parameters, env=dict(JAVA_OPTS='-Xmx{}'.format(mem)))
     # Write ouptut to file store

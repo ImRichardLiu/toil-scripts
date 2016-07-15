@@ -35,22 +35,21 @@ def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
 
     if config ['xmx'] is None:
         config['xmx'] = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024 ** 3)
+
     download_bam = job.wrapJobFn(download_url_job, url, name='toil.bam', s3_key_path=config['ssec'])
 
     if bai_url:
         bam_index = job.wrapJobFn(download_url_job, bai_url, name='toil.bam.bai', s3_key_path=config['ssec'])
-        download_bam.addChild(bam_index)
     else:
         bam_index = job.wrapJobFn(samtools_index, download_bam.rv(), config)
-        download_bam.addChild(bam_index)
 
     if config['preprocess']:
         preprocess = job.wrapJobFn(run_gatk_preprocessing, cores, download_bam.rv(), bam_index.rv(),
                                    config['genome.fa'], config['genome.dict'],
                                    config['genome.fa.fai'], config['phase.vcf'],
-                                   config['mills.vcf'], config['dbsnp.vcf'], mem=config['xmx'])
+                                   config['mills.vcf'], config['dbsnp.vcf'], mem=config['xmx'],
+                                   mock=config['mock_mode']).encapsulate()
         haplotype_caller = job.wrapJobFn(gatk_haplotype_caller, preprocess.rv(0), preprocess.rv(1), config)
-        download_bam.addChild(preprocess)
 
     else:
         haplotype_caller = job.wrapJobFn(gatk_haplotype_caller, download_bam.rv(), bam_index.rv(), config)
@@ -71,14 +70,21 @@ def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
 
     # Create DAG
     job.addChild(download_bam)
+    download_bam.addChild(bam_index)
+    if config['preprocess']:
+        job.fileStore.logToMaster('Preprocessing sample: {}'.format(uuid))
+        bam_index.addChild(preprocess)
     # Wait for bam index or preprocessing
-    download_bam.addFollowOn(haplotype_caller)
+    bam_index.addFollowOn(haplotype_caller)
+
     haplotype_caller.addChild(genotype_gvcf)
+
     genotype_gvcf.addChild(snp_recal)
     genotype_gvcf.addChild(indel_recal)
     genotype_gvcf.addChild(output_raw)
+
     genotype_gvcf.addFollowOn(apply_snp_recal)
-    apply_snp_recal.addChild(apply_indel_recal)
+    apply_snp_recal.addFollowOn(apply_indel_recal)
     apply_indel_recal.addChild(output_vqsr)
     return uuid, url
 
@@ -602,9 +608,10 @@ def main():
             config['suffix'] = options.suffix if options.suffix else ''
 
         root = Job.wrapJobFn(download_shared_files, config)
+        # Pass config dictionary to reference preprocessing
         ref = Job.wrapJobFn(reference_preprocessing, root.rv(), mock=config['mock_mode'])
 
-        root.addFollowOn(ref)
+        root.addChild(ref)
 
         for uuid, url in samples:
             ref.addFollowOnJobFn(gatk_germline_pipeline, uuid, url, ref.rv())
