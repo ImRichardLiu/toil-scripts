@@ -45,7 +45,7 @@ def run_cutadapt(job, r1_id, r2_id, fwd_3pr_adapter, rev_3pr_adapter):
     return r1_cut_id, r2_cut_id
 
 
-def run_samtools_faidx(job, ref_id):
+def run_samtools_faidx(job, ref_id, mock=False):
     """
     Use Samtools to create reference index file
 
@@ -58,7 +58,8 @@ def run_samtools_faidx(job, ref_id):
     work_dir = job.fileStore.getLocalTempDir()
     job.fileStore.readGlobalFile(ref_id, os.path.join(work_dir, 'ref.fasta'))
     command = ['faidx', 'ref.fasta']
-    docker_call(work_dir=work_dir, parameters=command,
+    outputs = {'ref.fasta.fai': None}
+    docker_call(work_dir=work_dir, parameters=command, mock=mock, outputs=outputs,
                 tool='quay.io/ucsc_cgl/samtools:0.1.19--dd5ac549b95eb3e5d166a5e310417ef13651994e')
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'ref.fasta.fai'))
 
@@ -82,7 +83,7 @@ def run_samtools_index(job, bam_id):
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bam.bai'))
 
 
-def run_picard_create_sequence_dictionary(job, ref_id):
+def run_picard_create_sequence_dictionary(job, ref_id, mock=False):
     """
     Use Picard-tools to create reference dictionary
 
@@ -95,7 +96,8 @@ def run_picard_create_sequence_dictionary(job, ref_id):
     work_dir = job.fileStore.getLocalTempDir()
     job.fileStore.readGlobalFile(ref_id, os.path.join(work_dir, 'ref.fasta'))
     command = ['CreateSequenceDictionary', 'R=ref.fasta', 'O=ref.dict']
-    docker_call(work_dir=work_dir, parameters=command,
+    outputs = {'ref.dict': None}
+    docker_call(work_dir=work_dir, parameters=command, mock=mock, outputs=outputs,
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e')
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'ref.dict'))
 

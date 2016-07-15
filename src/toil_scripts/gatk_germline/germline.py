@@ -1,5 +1,4 @@
 #!/usr/bin/env python2.7
-
 from __future__ import print_function
 import argparse
 import multiprocessing
@@ -11,12 +10,13 @@ from urlparse import urlparse
 from bd2k.util.processes import which
 
 from toil.job import Job
-from toil_scripts.lib.urls import download_url_job
 from toil_scripts.lib import require
+from toil_scripts.lib.urls import download_url_job
 from toil_scripts.lib.programs import docker_call
 from toil_scripts.lib.files import upload_or_move_job
 from toil_scripts.rnaseq_cgl.rnaseq_cgl_pipeline import generate_file
-from toil_scripts.gatk_processing.gatk_preprocessing import samtools_faidx, picard_create_sequence_dictionary
+from toil_scripts.tools.preprocessing import run_samtools_faidx, \
+    run_picard_create_sequence_dictionary, run_gatk_preprocessing
 
 
 def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
@@ -31,6 +31,8 @@ def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
     config = deepcopy(config)
     config['uuid'] = uuid
 
+    cores = multiprocessing.cpu_count()
+
     if config ['xmx'] is None:
         config['xmx'] = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024 ** 3)
     download_bam = job.wrapJobFn(download_url_job, url, name='toil.bam', s3_key_path=config['ssec'])
@@ -42,7 +44,17 @@ def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
         bam_index = job.wrapJobFn(samtools_index, download_bam.rv(), config)
         download_bam.addChild(bam_index)
 
-    haplotype_caller = job.wrapJobFn(gatk_haplotype_caller, download_bam.rv(), bam_index.rv(), config)
+    if config['preprocess']:
+        preprocess = job.wrapJobFn(run_gatk_preprocessing, cores, download_bam.rv(), bam_index.rv(),
+                                   config['genome.fa'], config['genome.dict'],
+                                   config['genome.fa.fai'], config['phase.vcf'],
+                                   config['mills.vcf'], config['dbsnp.vcf'], mem=config['xmx'])
+        haplotype_caller = job.wrapJobFn(gatk_haplotype_caller, preprocess.rv(0), preprocess.rv(1), config)
+        download_bam.addChild(preprocess)
+
+    else:
+        haplotype_caller = job.wrapJobFn(gatk_haplotype_caller, download_bam.rv(), bam_index.rv(), config)
+
     genotype_gvcf = job.wrapJobFn(gatk_genotype_gvcf, haplotype_caller.rv(), config)
 
     snp_recal = job.wrapJobFn(gatk_variant_recalibrator_snp, genotype_gvcf.rv(), config)
@@ -118,9 +130,9 @@ def reference_preprocessing(job, config, mock=False):
     job.fileStore.logToMaster('Preparing Reference Files')
     genome_id = config['genome.fa']
     if 'genome.fa.fai' not in config:
-        config['genome.fa.fai'] = job.addChildJobFn(samtools_faidx, genome_id, mock=mock).rv()
+        config['genome.fa.fai'] = job.addChildJobFn(run_samtools_faidx, genome_id, mock=mock).rv()
     if 'genome.dict' not in config:
-        config['genome.dict'] = job.addChildJobFn(picard_create_sequence_dictionary, genome_id, mock=mock).rv()
+        config['genome.dict'] = job.addChildJobFn(run_picard_create_sequence_dictionary, genome_id, mock=mock).rv()
     return config
 
 
@@ -447,6 +459,8 @@ def generate_config():
         hapmap:
         # Required: URL (1000G_omni.5.b37.vcf)
         omni:
+        # GATK Preprocessing
+        preprocess:
         # Approximate input file size. Should be given as %d[TGMK], e.g.,
         # for a 100 gigabyte file, use file-size: 100G
         file-size: 100G
@@ -577,8 +591,8 @@ def main():
         # Parse config
         config = {x.replace('-', '_'): y for x, y in yaml.load(open(options.config).read()).iteritems()}
         config_fields = set(config)
-        required_fields = {'genome', 'mills', 'dbsnp', 'phase', 'hapmap', 'omni',
-                           'output_dir', 'mock_mode', 'unsafe_mode', 'xmx', 'suffix'}
+        required_fields = {'genome', 'mills', 'dbsnp', 'phase', 'hapmap', 'omni', 'output_dir',
+                           'preprocess', 'mock_mode', 'unsafe_mode', 'xmx', 'suffix'}
         require(config_fields > required_fields,
                 'Missing config parameters:\n{}'.format(', '.join(required_fields - config_fields)))
 
