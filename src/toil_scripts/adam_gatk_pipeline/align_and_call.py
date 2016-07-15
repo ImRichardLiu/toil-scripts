@@ -171,6 +171,7 @@ def static_dag(job, uuid, rg_line, inputs):
     work_dir = job.fileStore.getLocalTempDir()
 
     inputs.cpu_count = cpu_count()
+    inputs.maxCores = sys.maxint
     args = {'uuid': uuid,
             's3_bucket': inputs.s3_bucket,
             'sequence_dir': inputs.sequence_dir,
@@ -181,9 +182,9 @@ def static_dag(job, uuid, rg_line, inputs):
     inputs.output_dir = 's3://{s3_bucket}/alignment{dir_suffix}'.format(**args)
     bwa = job.wrapJobFn(download_reference_files,
                         inputs,
-                        [uuid,
-                         's3://{s3_bucket}/{sequence_dir}/{uuid}_1.fastq.gz'.format(**args),
-                         's3://{s3_bucket}/{sequence_dir}/{uuid}_2.fastq.gz'.format(**args)]).encapsulate()
+                        [[uuid,
+                         ['s3://{s3_bucket}/{sequence_dir}/{uuid}_1.fastq.gz'.format(**args),
+                          's3://{s3_bucket}/{sequence_dir}/{uuid}_2.fastq.gz'.format(**args)]]]).encapsulate()
 
     # get head ADAM preprocessing job function and encapsulate it
     adam_preprocess = job.wrapJobFn(static_adam_preprocessing_dag,

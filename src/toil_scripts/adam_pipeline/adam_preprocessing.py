@@ -42,6 +42,7 @@ from toil_scripts.adam_uberscript.automated_scaling import SparkMasterAddress
 from toil_scripts.lib import require
 from toil_scripts.lib.programs import docker_call, mock_mode
 from toil_scripts.rnaseq_cgl.rnaseq_cgl_pipeline import generate_file
+from toil_scripts.tools.spark_tools import call_adam, call_conductor, MasterAddress, HDFS_MASTER_PORT, SPARK_MASTER_PORT
 
 log = logging.getLogger(__name__)
 
@@ -76,14 +77,16 @@ def truncate_file(master_ip, filename, spark_on_toil):
     master_ip = master_ip.actual
 
     ssh_call = ['ssh', '-o', 'StrictHostKeyChecking=no', master_ip]
+    hdfs = ['hdfs']
 
     if spark_on_toil:
         output = check_output(ssh_call + ['docker', 'ps'])
         container_id = next(line.split()[0] for line in output.splitlines() if 'apache-hadoop-master' in line)
         ssh_call += ['docker', 'exec', container_id]
+        hdfs = ['/opt/apache-hadoop/bin/hdfs']
 
     try:
-        check_call(ssh_call + ['hdfs', 'dfs', '-truncate', '-w', '10', '/' + filename])
+        check_call(ssh_call + hdfs + ['dfs', '-truncate', '-w', '10', '/' + filename])
     except:
         pass
 
@@ -96,10 +99,10 @@ def download_data(master_ip, inputs, known_snps, bam, hdfs_snps, hdfs_bam):
     """
 
     log.info("Downloading known sites file %s to %s.", known_snps, hdfs_snps)
-    call_conductor(master_ip, known_snps, hdfs_snps, memory=inputs['memory'])
+    call_conductor(master_ip, known_snps, hdfs_snps, memory=inputs.memory)
 
     log.info("Downloading input BAM %s to %s.", bam, hdfs_bam)
-    call_conductor(master_ip, bam, hdfs_bam, memory=inputs['memory'])
+    call_conductor(master_ip, bam, hdfs_bam, memory=inputs.memory)
 
 
 def adam_convert(master_ip, inputs, in_file, in_snps, adam_file, adam_snps, spark_on_toil):
@@ -108,14 +111,14 @@ def adam_convert(master_ip, inputs, in_file, in_snps, adam_file, adam_snps, spar
     """
 
     log.info("Converting input BAM to ADAM.")
-    call_adam(master_ip, ["transform", in_file, adam_file], memory=inputs['memory'])
+    call_adam(master_ip, ["transform", in_file, adam_file], memory=inputs.memory)
 
     in_file_name = in_file.split("/")[-1]
     remove_file(master_ip, in_file_name, spark_on_toil)
 
     log.info("Converting known sites VCF to ADAM.")
 
-    call_adam(master_ip, ["vcf2adam", "-only_variants", in_snps, adam_snps], memory=inputs['memory'])
+    call_adam(master_ip, ["vcf2adam", "-only_variants", in_snps, adam_snps], memory=inputs.memory)
 
     in_snps_name = in_snps.split("/")[-1]
     remove_file(master_ip, in_snps_name, spark_on_toil)
@@ -136,7 +139,7 @@ def adam_transform(master_ip, inputs, in_file, snp_file, hdfs_dir, out_file, spa
                "-aligned_read_predicate",
                "-limit_projection",
                "-mark_duplicate_reads"],
-              memory=inputs['memory'])
+              memory=inputs.memory)
 
     #FIXME
     in_file_name = in_file.split("/")[-1]
@@ -148,7 +151,7 @@ def adam_transform(master_ip, inputs, in_file, snp_file, hdfs_dir, out_file, spa
                hdfs_dir + "/mkdups.adam",
                hdfs_dir + "/ri.adam",
                "-realign_indels"],
-              memory=inputs['memory'])
+              memory=inputs.memory)
 
     remove_file(master_ip, hdfs_dir + "/mkdups.adam*", spark_on_toil)
 
@@ -159,7 +162,7 @@ def adam_transform(master_ip, inputs, in_file, snp_file, hdfs_dir, out_file, spa
                hdfs_dir + "/bqsr.adam",
                "-recalibrate_base_qualities",
                "-known_snps", snp_file],
-              memory=inputs['memory'])
+              memory=inputs.memory)
 
     remove_file(master_ip, "ri.adam*", spark_on_toil)
 
@@ -169,7 +172,7 @@ def adam_transform(master_ip, inputs, in_file, snp_file, hdfs_dir, out_file, spa
                hdfs_dir + "/bqsr.adam",
                out_file,
                "-sort_reads", "-single"],
-              memory=inputs['memory'])
+              memory=inputs.memory)
 
     remove_file(master_ip, "bqsr.adam*", spark_on_toil)
 
@@ -185,7 +188,7 @@ def upload_data(master_ip, inputs, hdfs_name, upload_name, spark_on_toil):
         truncate_file(master_ip, hdfs_name, spark_on_toil)
 
     log.info("Uploading output BAM %s to %s.", hdfs_name, upload_name)
-    call_conductor(master_ip, inputs, hdfs_name, upload_name)
+    call_conductor(master_ip, hdfs_name, upload_name, memory=inputs.memory)
     remove_file(master_ip, hdfs_name, spark_on_toil)
 
 
