@@ -1,4 +1,5 @@
 import os
+import multiprocessing
 
 from toil_scripts.lib import require
 from toil_scripts.lib.programs import docker_call
@@ -99,9 +100,13 @@ def samtools_view(job, bam_id, flag='0', mock=False):
     outputs = {'sample.output.bam': None},
     outpath = os.path.join(work_dir, 'sample.output.bam')
 
+    cores = multiprocessing.cpu_count()
+
     command = ['view',
-               '-b', '-o', '/data/sample.output.bam',
+               '-b',
+               '-o', '/data/sample.output.bam',
                '-F', flag,
+               '-@', cores,
                '/data/sample.bam']
     docker_call(work_dir=work_dir, parameters=command,
                 tool='quay.io/ucsc_cgl/samtools:1.3--256539928ea162949d8a65ca5c79a72ef557ce7c',
@@ -152,7 +157,7 @@ def picard_sort_sam(job, bam_id, xmx=8):
                'SORT_ORDER=coordinate',
                'CREATE_INDEX=true']
     docker_call(work_dir=work_dir, parameters=command,
-                env={'JAVA_OPTS':'-Xmx%sg' % xmx},
+                env={'JAVA_OPTS':'-Xmx%sg' % xmx.replace('G', '')},
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
                 outputs=outputs)
     bam_id = job.fileStore.writeGlobalFile(outpath_bam)
@@ -244,13 +249,17 @@ def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mill
     :param unsafe:
     :return:
     """
-    rm_secondary = job.wrapJobFn(samtools_view, bam, '0x800')
-    picard_sort = job.wrapJobFn(picard_sort_sam, rm_secondary.rv())
+    rm_secondary = job.wrapJobFn(samtools_view, bam, flag='0x800')
+    picard_sort = job.wrapJobFn(picard_sort_sam, rm_secondary.rv(), xmx=mem)
     mdups = job.wrapJobFn(picard_mark_duplicates, picard_sort.rv(0), picard_sort.rv(1))
-    rtc = job.wrapJobFn(run_realigner_target_creator, cores, mdups.rv(0), mdups.rv(1), ref, ref_dict, fai, phase, mills, mem, unsafe)
-    ir = job.wrapJobFn(run_indel_realignment, rtc.rv(), bam, bai, ref, ref_dict, fai, phase, mills, mem, unsafe)
-    br = job.wrapJobFn(run_base_recalibration, cores, ir.rv(0), ir.rv(1), ref, ref_dict, fai, dbsnp, mem, unsafe)
-    pr = job.wrapJobFn(run_print_reads, cores, br.rv(), ir.rv(0), ir.rv(1), ref, ref_dict, fai, mem, unsafe)
+    rtc = job.wrapJobFn(run_realigner_target_creator, cores, mdups.rv(0), mdups.rv(1), ref,
+                        ref_dict, fai, phase, mills, mem, unsafe)
+    ir = job.wrapJobFn(run_indel_realignment, rtc.rv(), bam, bai, ref, ref_dict, fai, phase,
+                       mills, mem, unsafe)
+    br = job.wrapJobFn(run_base_recalibration, cores, ir.rv(0), ir.rv(1), ref, ref_dict, fai,
+                       dbsnp, mem, unsafe)
+    pr = job.wrapJobFn(run_print_reads, cores, br.rv(), ir.rv(0), ir.rv(1), ref, ref_dict, fai,
+                       mem, unsafe)
     # Wiring
     job.addChild(rm_secondary)
     rm_secondary.addChild(picard_sort)

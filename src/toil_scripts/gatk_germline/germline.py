@@ -56,7 +56,6 @@ def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
         haplotype_caller = job.wrapJobFn(gatk_haplotype_caller, download_bam.rv(), bam_index.rv(), config)
 
     genotype_gvcf = job.wrapJobFn(gatk_genotype_gvcf, haplotype_caller.rv(), config)
-
     snp_recal = job.wrapJobFn(gatk_variant_recalibrator_snp, genotype_gvcf.rv(), config)
     apply_snp_recal = job.wrapJobFn(gatk_apply_variant_recalibration_snp, genotype_gvcf.rv(),
                                     snp_recal.rv(0), snp_recal.rv(1), config)
@@ -72,7 +71,7 @@ def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
 
     # Create DAG
     job.addChild(download_bam)
-    # Wait for bam index
+    # Wait for bam index or preprocessing
     download_bam.addFollowOn(haplotype_caller)
     haplotype_caller.addChild(genotype_gvcf)
     genotype_gvcf.addChild(snp_recal)
