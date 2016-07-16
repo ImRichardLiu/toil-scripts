@@ -115,7 +115,7 @@ def samtools_view(job, bam_id, flag='0', mock=False):
     return job.fileStore.writeGlobalFile(outpath)
 
 
-def run_picard_create_sequence_dictionary(job, ref_id, mock=False):
+def run_picard_create_sequence_dictionary(job, ref_id, xmx='10G', mock=False):
     """
     Use Picard-tools to create reference dictionary
 
@@ -130,6 +130,7 @@ def run_picard_create_sequence_dictionary(job, ref_id, mock=False):
     command = ['CreateSequenceDictionary', 'R=ref.fasta', 'O=ref.dict']
     outputs = {'ref.dict': None}
     docker_call(work_dir=work_dir, parameters=command, mock=mock, outputs=outputs,
+                env={'JAVA_OPTS':'-Xmx{}'.format(xmx)},
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e')
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'ref.dict'))
 
@@ -157,7 +158,7 @@ def picard_sort_sam(job, bam_id, xmx='8', mock=False):
                'SORT_ORDER=coordinate',
                'CREATE_INDEX=true']
     docker_call(work_dir=work_dir, parameters=command,
-                env={'JAVA_OPTS':'-Xmx%sg' % xmx},
+                env={'JAVA_OPTS':'-Xmx{}'.format(xmx)},
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
                 outputs=outputs, mock=mock)
     bam_id = job.fileStore.writeGlobalFile(outpath_bam)
@@ -201,7 +202,7 @@ def picard_mark_duplicates(job, bam_id, bai_id, xmx='8G', mock=False):
     bai_id = job.fileStore.writeGlobalFile(outpath_bai)
     return bam_id, bai_id
 
-def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, dbsnp, mem='10G', unsafe=False):
+def run_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, dbsnp, mem='10G', unsafe=False):
     """
     Convenience method for grouping together GATK preprocessing
 
@@ -252,7 +253,8 @@ def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mill
     """
     rm_secondary = job.wrapJobFn(samtools_view, bam, flag='0x800', mock=mock)
     picard_sort = job.wrapJobFn(picard_sort_sam, rm_secondary.rv(), xmx=mem, mock=mock)
-    mdups = job.wrapJobFn(picard_mark_duplicates, picard_sort.rv(0), picard_sort.rv(1), mock=mock)
+    mdups = job.wrapJobFn(picard_mark_duplicates, picard_sort.rv(0), picard_sort.rv(1),
+                          xmx=mem, mock=mock)
     rtc = job.wrapJobFn(run_realigner_target_creator, cores, mdups.rv(0), mdups.rv(1), ref,
                         ref_dict, fai, phase, mills, mem, unsafe=unsafe, mock=mock)
     ir = job.wrapJobFn(run_indel_realignment, rtc.rv(), bam, bai, ref, ref_dict, fai, phase,
