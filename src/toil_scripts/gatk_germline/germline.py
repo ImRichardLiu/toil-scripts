@@ -198,10 +198,13 @@ def gatk_haplotype_caller(job, bam_id, bai_id, config):
                '-variant_index_parameter', '128000',
                '--genotyping_mode', 'Discovery',
                '--emitRefConfidence', 'GVCF',
-               '--annotation', 'QualByDepth',
-               '--annotation', 'DepthPerSampleHC',
-               '--annotation', 'FisherStrand',
-               '--annotation', 'ReadPosRankSumTest']
+               '--annotation', 'QD',
+               '--annotation', 'MQ',
+               '--annotation', 'MQRankSum',
+               '--annotation', 'ReadPosRankSum',
+               '--annotation', 'FS',
+               '--annotation', 'SOR',
+               '--annotation', 'InbreedingCoeff']
 
     if config['unsafe_mode']:
         command = ['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'] + command
@@ -275,6 +278,7 @@ def gatk_variant_recalibrator_snp(job, vcf_id, config):
     inputs['toil.vcf'] = vcf_id
     get_files_from_filestore(job, work_dir, inputs)
 
+    # DP is a recommended annotation, but does not work well with exome data
     command = ['-T', 'VariantRecalibrator',
                '-R', 'genome.fa',
                '-input', 'toil.vcf',
@@ -283,7 +287,13 @@ def gatk_variant_recalibrator_snp(job, vcf_id, config):
                '-resource:omni,known=false,training=true,truth=false,prior=12.0', 'omni.vcf',
                '-resource:dbsnp,known=true,training=false,truth=false,prior=2.0', 'dbsnp.vcf',
                '-resource:1000G,known=false,training=true,truth=false,prior=10.0', 'phase.vcf',
-               '-an', 'QD', '-an', 'DP', '-an', 'FS', '-an', 'ReadPosRankSum',
+               '-an', 'QD',
+               '-an', 'MQ',
+               '-an', 'MQRankSum',
+               '-an', 'ReadPosRankSum',
+               '-an', 'FS',
+               '-an', 'SOR',
+               '-an', 'InbreedingCoeff',
                '-mode', 'SNP', '-minNumBad', '5000',
                '-recalFile', 'HAPSNP.recal',
                '-tranchesFile', 'HAPSNP.tranches',
@@ -368,18 +378,24 @@ def gatk_variant_recalibrator_indel(job, vcf_id, config):
     inputs['toil.vcf'] = vcf_id
     get_files_from_filestore(job, work_dir, inputs)
 
+    # DP is a recommended annotation, but does not work well with exome data
     command = ['-T', 'VariantRecalibrator',
                '-R', 'genome.fa',
                '-input', 'toil.vcf',
                '-nt', str(cores),
                '-resource:mills,known=true,training=true,truth=true,prior=12.0', 'mills.vcf',
-               '-an', 'DP', '-an', 'FS', '-an', 'ReadPosRankSum',
+               '-an', 'QD',
+               '-an', 'FS',
+               '-an', 'SOR',
+               '-an', 'ReadPosRankSum',
+               '-an', 'MQRankSum',
+               '-an', 'InbreedingCoeff',
                '-mode', 'INDEL',
-               '-minNumBad', '5000',
                '-recalFile', 'HAPINDEL.recal',
                '-tranchesFile', 'HAPINDEL.tranches',
                '-rscriptFile', 'HAPINDEL.plots',
-               '--maxGaussians', '4']
+               '--maxGaussians', '4',
+               '--minNumBadVariants', '5000']
 
     if config['unsafe_mode']:
         command = ['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'] + command
