@@ -2,6 +2,7 @@ import os
 import multiprocessing
 
 from toil_scripts.lib import require
+from toil_scripts.lib.files import upload_or_move_job
 from toil_scripts.lib.programs import docker_call
 
 
@@ -234,6 +235,7 @@ def run_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, db
 
 
 def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, dbsnp,
+                           output_dir,
                            mem='10G', unsafe=False, mock=False):
     """
     Pre-processing steps for running the GATK Germline pipeline
@@ -252,9 +254,12 @@ def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mill
     :return:
     """
     rm_secondary = job.wrapJobFn(samtools_view, bam, flag='0x800', mock=mock)
+    output_rm_secondary = job.wrapJobFn(upload_or_move_job, 'rm_secondary.bam', rm_secondary.rv(), output_dir)
     picard_sort = job.wrapJobFn(picard_sort_sam, rm_secondary.rv(), xmx=mem, mock=mock)
+    output_picard_sort = job.wrapJobFn(upload_or_move_job, 'picard_sort.bam', picard_sort.rv(0), output_dir)
     mdups = job.wrapJobFn(picard_mark_duplicates, picard_sort.rv(0), picard_sort.rv(1),
                           xmx=mem, mock=mock)
+    output_mdups = job.wrapJobFn(upload_or_move_job, 'mdups.bam', mdups.rv(0), output_dir)
     rtc = job.wrapJobFn(run_realigner_target_creator, cores, mdups.rv(0), mdups.rv(1), ref,
                         ref_dict, fai, phase, mills, mem, unsafe=unsafe, mock=mock)
     ir = job.wrapJobFn(run_indel_realignment, rtc.rv(), bam, bai, ref, ref_dict, fai, phase,
@@ -266,8 +271,11 @@ def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mill
     # Wiring
     job.addChild(rm_secondary)
     rm_secondary.addChild(picard_sort)
+    rm_secondary.addChild(output_rm_secondary)
     picard_sort.addChild(mdups)
+    picard_sort.addChild(output_picard_sort)
     mdups.addChild(rtc)
+    mdups.addChild(output_mdups)
     rtc.addChild(ir)
     ir.addChild(br)
     br.addChild(pr)

@@ -47,7 +47,8 @@ def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
         preprocess = job.wrapJobFn(run_gatk_preprocessing, cores, download_bam.rv(), bam_index.rv(),
                                    config['genome.fa'], config['genome.dict'],
                                    config['genome.fa.fai'], config['phase.vcf'],
-                                   config['mills.vcf'], config['dbsnp.vcf'], mem=config['xmx'],
+                                   config['mills.vcf'], config['dbsnp.vcf'], config['output_dir'],
+                                   mem=config['xmx'],
                                    mock=config['mock_mode']).encapsulate()
         haplotype_caller = job.wrapJobFn(gatk_haplotype_caller, preprocess.rv(0), preprocess.rv(1), config)
 
