@@ -627,7 +627,8 @@ def main():
         # Pass config dictionary to reference preprocessing
         ref = Job.wrapJobFn(reference_preprocessing, root.rv(), mock=config['mock_mode'])
 
-        root.addChild(ref)
+        # Run after shared files have been downloaded
+        root.addFollowOn(ref)
 
         for uuid, url in samples:
             ref.addFollowOnJobFn(gatk_germline_pipeline, uuid, url, ref.rv())
