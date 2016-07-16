@@ -212,7 +212,7 @@ def gatk_haplotype_caller(job, bam_id, bai_id, config):
 
     outputs={'toil.gvcf': None}
     docker_call(work_dir = work_dir,
-                env={'JAVA_OPTS':'-Xmx{}'.format(config['xmx'])},
+                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx{}'.format(config['xmx'])},
                 parameters = command,
                 tool = 'quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs=inputs.keys(),
@@ -252,7 +252,7 @@ def gatk_genotype_gvcf(job, gvcf_id, config):
 
     outputs = {'toil.vcf': None}
     docker_call(work_dir = work_dir,
-                env={'JAVA_OPTS':'-Xmx{}'.format(config['xmx'])},
+                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx{}'.format(config['xmx'])},
                 parameters = command,
                 tool = 'quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs=inputs.keys(),
@@ -305,7 +305,7 @@ def gatk_variant_recalibrator_snp(job, vcf_id, config):
 
     outputs = {'HAPSNP.recal': None, 'HAPSNP.tranches': None, 'HAPSNP.plots': None}
     docker_call(work_dir = work_dir,
-                env={'JAVA_OPTS':'-Xmx{}'.format(config['xmx'])},
+                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx{}'.format(config['xmx'])},
                 parameters = command,
                 tool ='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs=inputs.keys(),
@@ -353,7 +353,7 @@ def gatk_apply_variant_recalibration_snp(job, vcf_id, recal_id, tranches_id, con
 
     outputs={'toil.vqsr.vcf': None}
     docker_call(work_dir = work_dir,
-                env={'JAVA_OPTS':'-Xmx{}'.format(config['xmx'])},
+                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx{}'.format(config['xmx'])},
                 parameters = command,
                 tool = 'quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs=inputs.keys(),
@@ -403,7 +403,7 @@ def gatk_variant_recalibrator_indel(job, vcf_id, config):
 
     outputs = {'HAPINDEL.recal': None, 'HAPINDEL.tranches': None, 'HAPINDEL.plots': None}
     docker_call(work_dir = work_dir,
-                env={'JAVA_OPTS':'-Xmx{}'.format(config['xmx'])},
+                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx{}'.format(config['xmx'])},
                 parameters = command,
                 tool ='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs=inputs.keys(),
@@ -453,7 +453,7 @@ def gatk_apply_variant_recalibration_indel(job, vcf_id, recal_id, tranches_id, c
 
     outputs={'toil.vqsr.vcf': None}
     docker_call(work_dir = work_dir,
-                env={'JAVA_OPTS':'-Xmx{}'.format(config['xmx'])},
+                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx{}'.format(config['xmx'])},
                 parameters = command,
                 tool = 'quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs = inputs.keys(),

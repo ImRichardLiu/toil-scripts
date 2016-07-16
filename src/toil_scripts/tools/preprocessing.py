@@ -131,12 +131,12 @@ def run_picard_create_sequence_dictionary(job, ref_id, xmx='10G', mock=False):
     command = ['CreateSequenceDictionary', 'R=ref.fasta', 'O=ref.dict']
     outputs = {'ref.dict': None}
     docker_call(work_dir=work_dir, parameters=command, mock=mock, outputs=outputs,
-                env={'JAVA_OPTS':'-Xmx{}'.format(xmx)},
+                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx{}'.format(xmx)},
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e')
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'ref.dict'))
 
 
-def picard_sort_sam(job, bam_id, xmx='8', mock=False):
+def picard_sort_sam(job, bam_id, xmx='8G', mock=False):
     """
     Uses picardtools SortSam to sort a sample bam file
 
@@ -149,8 +149,6 @@ def picard_sort_sam(job, bam_id, xmx='8', mock=False):
     work_dir = job.fileStore.getLocalTempDir()
     outputs={'sample.sorted.bam': None, 'sample.sorted.bai': None}
     job.fileStore.readGlobalFile(bam_id, os.path.join(work_dir, 'sample.bam'))
-    outpath_bam = os.path.join(work_dir, 'sample.sorted.bam')
-    outpath_bai = os.path.join(work_dir, 'sample.sorted.bai')
 
     #Call: picardtools
     command = ['SortSam',
@@ -159,9 +157,12 @@ def picard_sort_sam(job, bam_id, xmx='8', mock=False):
                'SORT_ORDER=coordinate',
                'CREATE_INDEX=true']
     docker_call(work_dir=work_dir, parameters=command,
-                env={'JAVA_OPTS':'-Xmx{}'.format(xmx)},
+                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx{}'.format(xmx)},
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
                 outputs=outputs, mock=mock)
+
+    outpath_bam = os.path.join(work_dir, 'sample.sorted.bam')
+    outpath_bai = os.path.join(work_dir, 'sample.sorted.bai')
     bam_id = job.fileStore.writeGlobalFile(outpath_bam)
     bai_id = job.fileStore.writeGlobalFile(outpath_bai)
     return bam_id, bai_id
@@ -192,10 +193,10 @@ def picard_mark_duplicates(job, bam_id, bai_id, xmx='8G', mock=False):
                'INPUT=sample.sorted.bam',
                'OUTPUT=sample.mkdups.bam',
                'METRICS_FILE=metrics.txt',
-               'ASSUME_SORTED=true',
+               'ASSUME_SORT_ORDER=coordinate',
                'CREATE_INDEX=true']
     docker_call(work_dir=work_dir, parameters=command,
-                env={'JAVA_OPTS':'-Xmx{}'.format(xmx)},
+                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx{}'.format(xmx)},
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
                 outputs=outputs, mock=mock)
 
@@ -320,7 +321,8 @@ def run_realigner_target_creator(job, cores, bam, bai, ref, ref_dict, fai, phase
     docker_call(tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs=inputs,
                 outputs={'sample.intervals': None}, mock=mock,
-                work_dir=work_dir, parameters=parameters, env=dict(JAVA_OPTS='-Xmx{}'.format(mem)))
+                work_dir=work_dir, parameters=parameters,
+                env=dict(_JAVA_OPTIONS='-Djava.io.tmpdir=/data/ -Xmx{}'.format(mem)))
     # Write to fileStore
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.intervals'))
 
@@ -366,7 +368,7 @@ def run_indel_realignment(job, intervals, bam, bai, ref, ref_dict, fai, phase, m
     docker_call(tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs=inputs, mock=mock,
                 outputs={'sample.indel.bam': None, 'sample.indel.bai': None},
-                work_dir=work_dir, parameters=parameters, env=dict(JAVA_OPTS='-Xmx{}'.format(mem)))
+                work_dir=work_dir, parameters=parameters, env=dict(_JAVA_OPTIONS='-Djava.io.tmpdir=/data/ -Xmx{}'.format(mem)))
     # Write to fileStore
     indel_bam = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.indel.bam'))
     indel_bai = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.indel.bai'))
@@ -408,7 +410,8 @@ def run_base_recalibration(job, cores, indel_bam, indel_bai, ref, ref_dict, fai,
     docker_call(tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs=inputs, mock=mock,
                 outputs={'sample.recal.table': None},
-                work_dir=work_dir, parameters=parameters, env=dict(JAVA_OPTS='-Xmx{}'.format(mem)))
+                work_dir=work_dir, parameters=parameters,
+                env=dict(_JAVA_OPTIONS='-Djava.io.tmpdir=/data/ -Xmx{}'.format(mem)))
     # Write output to file store
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.recal.table'))
 
@@ -450,7 +453,8 @@ def run_print_reads(job, cores, table, indel_bam, indel_bai, ref, ref_dict, fai,
     docker_call(tool='quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs=inputs, mock=mock,
                 outputs={'sample.bqsr.bam': None, 'sample.bqsr.bai': None},
-                work_dir=work_dir, parameters=parameters, env=dict(JAVA_OPTS='-Xmx{}'.format(mem)))
+                work_dir=work_dir, parameters=parameters,
+                env=dict(_JAVA_OPTIONS='-Djava.io.tmpdir=/data/ -Xmx{}'.format(mem)))
     # Write ouptut to file store
     bam_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bqsr.bam'))
     bai_id = job.fileStore.writeGlobalFile(os.path.join(work_dir, 'sample.bqsr.bai'))
