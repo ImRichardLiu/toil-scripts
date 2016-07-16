@@ -105,8 +105,8 @@ def samtools_view(job, bam_id, flag='0', mock=False):
     command = ['view',
                '-b',
                '-o', '/data/sample.output.bam',
-               '-F', flag,
-               '-@', cores,
+               '-F', str(flag),
+               '-@', str(cores),
                '/data/sample.bam']
     docker_call(work_dir=work_dir, parameters=command,
                 tool='quay.io/ucsc_cgl/samtools:1.3--256539928ea162949d8a65ca5c79a72ef557ce7c',
