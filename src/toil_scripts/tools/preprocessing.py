@@ -198,9 +198,7 @@ def picard_mark_duplicates(job, bam_id, bai_id, xmx='8G', mock=False):
                'ASSUME_SORTED=true',
                'CREATE_INDEX=true']
     docker_call(work_dir=work_dir, parameters=command,
-                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ '
-                                     '-Xmx{} '
-                                     '-XX:ParallelGCThreads={}'.format(xmx, cores)},
+                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx10G'},
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
                 outputs=outputs, mock=mock)
 
