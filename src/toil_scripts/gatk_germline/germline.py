@@ -619,7 +619,9 @@ def main():
                 'Missing config parameters:\n{}'.format(', '.join(required_fields - config_fields)))
 
         if config['output_dir'] is  None:
-            config['output_dir'] = options.output_dir if options.output_dir else os.getcwd()
+            config['output_dir'] = options.output_dir if options.output_dir \
+                else os.path.join(os.getcwd(), 'output')
+
 
         if config['suffix'] is  None:
             config['suffix'] = options.suffix if options.suffix else ''

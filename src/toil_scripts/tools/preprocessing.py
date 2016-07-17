@@ -188,6 +188,8 @@ def picard_mark_duplicates(job, bam_id, bai_id, xmx='8G', mock=False):
     job.fileStore.readGlobalFile(bam_id, os.path.join(work_dir, 'sample.sorted.bam'))
     job.fileStore.readGlobalFile(bai_id, os.path.join(work_dir, 'sample.sorted.bai'))
 
+    cores = multiprocessing.cpu_count() / 2
+
     # Call: picardtools
     command = ['MarkDuplicates',
                'INPUT=sample.sorted.bam',
@@ -196,7 +198,9 @@ def picard_mark_duplicates(job, bam_id, bai_id, xmx='8G', mock=False):
                'ASSUME_SORTED=true',
                'CREATE_INDEX=true']
     docker_call(work_dir=work_dir, parameters=command,
-                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx{}'.format(xmx)},
+                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ '
+                                     '-Xmx{} '
+                                     '-XX:ParallelGCThreads={}'.format(xmx, cores)},
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
                 outputs=outputs, mock=mock)
 
