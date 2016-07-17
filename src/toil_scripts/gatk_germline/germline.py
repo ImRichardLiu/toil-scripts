@@ -198,14 +198,7 @@ def gatk_haplotype_caller(job, bam_id, bai_id, config):
                '-variant_index_type', 'LINEAR',
                '-variant_index_parameter', '128000',
                '--genotyping_mode', 'Discovery',
-               '--emitRefConfidence', 'GVCF',
-               '--annotation', 'QD',
-               '--annotation', 'MQ',
-               '--annotation', 'MQRankSum',
-               '--annotation', 'ReadPosRankSum',
-               '--annotation', 'FS',
-               '--annotation', 'SOR',
-               '--annotation', 'InbreedingCoeff']
+               '--emitRefConfidence', 'GVCF']
 
     if config['unsafe_mode']:
         command = ['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'] + command
