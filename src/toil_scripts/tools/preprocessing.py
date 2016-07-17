@@ -193,7 +193,7 @@ def picard_mark_duplicates(job, bam_id, bai_id, xmx='8G', mock=False):
                'INPUT=sample.sorted.bam',
                'OUTPUT=sample.mkdups.bam',
                'METRICS_FILE=metrics.txt',
-               'ASSUME_SORT_ORDER=coordinate',
+               'ASSUME_SORTED=true',
                'CREATE_INDEX=true']
     docker_call(work_dir=work_dir, parameters=command,
                 env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx{}'.format(xmx)},
