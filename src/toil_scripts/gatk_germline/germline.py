@@ -321,7 +321,7 @@ def gatk_variant_recalibrator_snp(job, vcf_id, config):
                '-an', 'ReadPosRankSum',
                '-an', 'FS',
                '-an', 'SOR',
-               '-mode', 'SNP', '-minNumBad', '5000',
+               '-mode', 'SNP', '-minNumBad', '1000',
                '-recalFile', 'HAPSNP.recal',
                '-tranchesFile', 'HAPSNP.tranches',
                '-rscriptFile', 'HAPSNP.plots']
@@ -421,7 +421,7 @@ def gatk_variant_recalibrator_indel(job, vcf_id, config):
                '-tranchesFile', 'HAPINDEL.tranches',
                '-rscriptFile', 'HAPINDEL.plots',
                '--maxGaussians', '4',
-               '--minNumBadVariants', '5000']
+               '--minNumBadVariants', '1000']
 
     if config['unsafe_mode']:
         command = ['-U', 'ALLOW_SEQ_DICT_INCOMPATIBILITY'] + command
