@@ -36,26 +36,33 @@ def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
     if config ['xmx'] is None:
         config['xmx'] = '{}G'.format(os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024 ** 3))
 
-    download_bam = job.wrapJobFn(download_url_job, url, name='toil.bam', s3_key_path=config['ssec'])
+    if config['run_bwa']:
+        pass
+    else:
+        get_bam = job.wrapJobFn(download_url_job, url, name='toil.bam', s3_key_path=config['ssec'])
 
     if bai_url:
-        bam_index = job.wrapJobFn(download_url_job, bai_url, name='toil.bam.bai', s3_key_path=config['ssec'])
+        get_bai = job.wrapJobFn(download_url_job, bai_url, name='toil.bam.bai', s3_key_path=config['ssec'])
     else:
-        bam_index = job.wrapJobFn(samtools_index, download_bam.rv(), config)
+        get_bai = job.wrapJobFn(samtools_index, get_bam.rv(), config)
 
+    job.addChild(get_bam)
+    get_bam.addChild(get_bai)
+    
     if config['preprocess']:
-        preprocess = job.wrapJobFn(run_gatk_preprocessing, cores, download_bam.rv(), bam_index.rv(),
+        job.fileStore.logToMaster('Preprocessing sample: {}'.format(uuid))
+        preprocess = job.wrapJobFn(run_gatk_preprocessing, cores, get_bam.rv(), get_bai.rv(),
                                    config['genome.fa'], config['genome.dict'],
                                    config['genome.fa.fai'], config['phase.vcf'],
                                    config['mills.vcf'], config['dbsnp.vcf'], config['output_dir'],
-                                   mem=config['xmx'],
-                                   mock=config['mock_mode']).encapsulate()
+                                   mem=config['xmx'], mock=config['mock_mode']).encapsulate()
         haplotype_caller = job.wrapJobFn(gatk_haplotype_caller, preprocess.rv(0), preprocess.rv(1), config)
-
+        get_bai.addChild(preprocess)
     else:
-        haplotype_caller = job.wrapJobFn(gatk_haplotype_caller, download_bam.rv(), bam_index.rv(), config)
+        haplotype_caller = job.wrapJobFn(gatk_haplotype_caller, get_bam.rv(), get_bai.rv(), config)
 
     genotype_gvcf = job.wrapJobFn(gatk_genotype_gvcf, haplotype_caller.rv(), config)
+
     snp_recal = job.wrapJobFn(gatk_variant_recalibrator_snp, genotype_gvcf.rv(), config)
     apply_snp_recal = job.wrapJobFn(gatk_apply_variant_recalibration_snp, genotype_gvcf.rv(),
                                     snp_recal.rv(0), snp_recal.rv(1), config)
@@ -69,14 +76,8 @@ def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
     output_raw = job.wrapJobFn(upload_or_move_job, raw_name, genotype_gvcf.rv(), config['output_dir'])
     output_vqsr = job.wrapJobFn(upload_or_move_job, vqsr_name, apply_indel_recal.rv(), config['output_dir'])
 
-    # Create DAG
-    job.addChild(download_bam)
-    download_bam.addChild(bam_index)
-    if config['preprocess']:
-        job.fileStore.logToMaster('Preprocessing sample: {}'.format(uuid))
-        bam_index.addChild(preprocess)
     # Wait for bam index or preprocessing
-    bam_index.addFollowOn(haplotype_caller)
+    get_bai.addFollowOn(haplotype_caller)
 
     haplotype_caller.addChild(genotype_gvcf)
 
@@ -472,6 +473,8 @@ def generate_config():
         hapmap:
         # Required: URL (1000G_omni.5.b37.vcf)
         omni:
+        # Run BWA on fastqs
+        run_bwa:
         # GATK Preprocessing
         preprocess:
         # Approximate input file size. Should be given as %d[TGMK], e.g.,
@@ -605,14 +608,13 @@ def main():
         config = {x.replace('-', '_'): y for x, y in yaml.load(open(options.config).read()).iteritems()}
         config_fields = set(config)
         required_fields = {'genome', 'mills', 'dbsnp', 'phase', 'hapmap', 'omni', 'output_dir',
-                           'preprocess', 'mock_mode', 'unsafe_mode', 'xmx', 'suffix'}
+                           'run_bwa', 'preprocess', 'mock_mode', 'unsafe_mode', 'xmx', 'suffix'}
         require(config_fields > required_fields,
                 'Missing config parameters:\n{}'.format(', '.join(required_fields - config_fields)))
 
         if config['output_dir'] is  None:
             config['output_dir'] = options.output_dir if options.output_dir \
                 else os.path.join(os.getcwd(), 'output')
-
 
         if config['suffix'] is  None:
             config['suffix'] = options.suffix if options.suffix else ''

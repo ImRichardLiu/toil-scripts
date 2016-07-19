@@ -168,9 +168,9 @@ def picard_sort_sam(job, bam_id, xmx='8G', mock=False):
     return bam_id, bai_id
 
 
-def picard_mark_duplicates(job, bam_id, bai_id, xmx='8G', mock=False):
+def picard_mark_duplicates(job, bam_id, bai_id, xmx='10G', mock=False):
     """
-    Uses picardtools MarkDuplicates
+    Runs picardtools MarkDuplicates. Assumes the bam file is coordinate sorted.
 
     :param job:
     :param bam_id:
@@ -188,8 +188,6 @@ def picard_mark_duplicates(job, bam_id, bai_id, xmx='8G', mock=False):
     job.fileStore.readGlobalFile(bam_id, os.path.join(work_dir, 'sample.sorted.bam'))
     job.fileStore.readGlobalFile(bai_id, os.path.join(work_dir, 'sample.sorted.bai'))
 
-    cores = multiprocessing.cpu_count() / 2
-
     # Call: picardtools
     command = ['MarkDuplicates',
                'INPUT=sample.sorted.bam',
@@ -198,7 +196,7 @@ def picard_mark_duplicates(job, bam_id, bai_id, xmx='8G', mock=False):
                'ASSUME_SORTED=true',
                'CREATE_INDEX=true']
     docker_call(work_dir=work_dir, parameters=command,
-                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx10G'},
+                env={'_JAVA_OPTIONS':'-Djava.io.tmpdir=/data/ -Xmx{}'.format(xmx)},
                 tool='quay.io/ucsc_cgl/picardtools:1.95--dd5ac549b95eb3e5d166a5e310417ef13651994e',
                 outputs=outputs, mock=mock)
 
@@ -238,8 +236,7 @@ def run_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, db
 
 
 def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, dbsnp,
-                           output_dir,
-                           mem='10G', unsafe=False, mock=False):
+                           output_dir, mem='10G', unsafe=False, mock=False):
     """
     Pre-processing steps for running the GATK Germline pipeline
 
@@ -257,32 +254,28 @@ def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mill
     :return:
     """
     rm_secondary = job.wrapJobFn(samtools_view, bam, flag='0x800', mock=mock)
-    output_rm_secondary = job.wrapJobFn(upload_or_move_job, 'rm_secondary.bam', rm_secondary.rv(), output_dir)
     picard_sort = job.wrapJobFn(picard_sort_sam, rm_secondary.rv(), xmx=mem, mock=mock)
-    output_picard_sort = job.wrapJobFn(upload_or_move_job, 'picard_sort.bam', picard_sort.rv(0), output_dir)
     mdups = job.wrapJobFn(picard_mark_duplicates, picard_sort.rv(0), picard_sort.rv(1),
                           xmx=mem, mock=mock)
-    output_mdups = job.wrapJobFn(upload_or_move_job, 'mdups.bam', mdups.rv(0), output_dir)
-    rtc = job.wrapJobFn(run_realigner_target_creator, cores, mdups.rv(0), mdups.rv(1), ref,
-                        ref_dict, fai, phase, mills, mem, unsafe=unsafe, mock=mock)
-    ir = job.wrapJobFn(run_indel_realignment, rtc.rv(), bam, bai, ref, ref_dict, fai, phase,
-                       mills, mem, unsafe=unsafe, mock=mock)
-    br = job.wrapJobFn(run_base_recalibration, cores, ir.rv(0), ir.rv(1), ref, ref_dict, fai,
-                       dbsnp, mem, unsafe=unsafe, mock=mock)
-    pr = job.wrapJobFn(run_print_reads, cores, br.rv(), ir.rv(0), ir.rv(1), ref, ref_dict, fai,
-                       mem, unsafe=unsafe, mock=mock)
+    realigner_target = job.wrapJobFn(run_realigner_target_creator, cores, mdups.rv(0), mdups.rv(1),
+                                     ref, ref_dict, fai, phase, mills, mem, unsafe=unsafe,
+                                     mock=mock)
+    indel_realign = job.wrapJobFn(run_indel_realignment, realigner_target.rv(), bam, bai, ref,
+                                  ref_dict, fai, phase, mills, mem, unsafe=unsafe, mock=mock)
+    base_recal = job.wrapJobFn(run_base_recalibration, cores, indel_realign.rv(0),
+                               indel_realign.rv(1), ref, ref_dict, fai, dbsnp, mem, unsafe=unsafe,
+                               mock=mock)
+    print_reads = job.wrapJobFn(run_print_reads, cores, base_recal.rv(), indel_realign.rv(0),
+                                indel_realign.rv(1), ref, ref_dict, fai, mem, unsafe=unsafe, mock=mock)
     # Wiring
     job.addChild(rm_secondary)
     rm_secondary.addChild(picard_sort)
-    rm_secondary.addChild(output_rm_secondary)
     picard_sort.addChild(mdups)
-    picard_sort.addChild(output_picard_sort)
-    mdups.addChild(rtc)
-    mdups.addChild(output_mdups)
-    rtc.addChild(ir)
-    ir.addChild(br)
-    br.addChild(pr)
-    return pr.rv(0), pr.rv(1)
+    mdups.addChild(realigner_target)
+    realigner_target.addChild(indel_realign)
+    indel_realign.addChild(base_recal)
+    base_recal.addChild(print_reads)
+    return print_reads.rv(0), print_reads.rv(1)
 
 
 def run_realigner_target_creator(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, mem,
