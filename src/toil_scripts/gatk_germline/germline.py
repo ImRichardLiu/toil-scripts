@@ -16,7 +16,30 @@ from toil_scripts.lib.programs import docker_call
 from toil_scripts.lib.files import upload_or_move_job
 from toil_scripts.rnaseq_cgl.rnaseq_cgl_pipeline import generate_file
 from toil_scripts.tools.preprocessing import run_samtools_faidx, \
-    run_picard_create_sequence_dictionary, run_gatk_preprocessing
+    run_picard_create_sequence_dictionary, run_germline_preprocessing
+
+
+def setup_and_run_bwa_kit(job, url, config):
+    bwa_config = argparse.Namespace()
+    fq1 = job.addChildJobFn(download_url_job, url, name='toil.1.fq',
+                            s3_key_path=config['ssec'])
+    fq2_url = url.replace('1.fq', '2.fq')
+    fq2 = job.addChildJobFn(download_url_job, fq2_url, name='toil.2.fq',
+                            s3_key_path=config['ssec'])
+    bwa_config.r1 = fq1.rv()
+    bwa_config.r2 = fq2.rv()
+    index_exts = ['.amb', '.ann', '.bwt', '.pac', '.sa', '.alt']
+    index_files = [config['bwa_index_name'] + ext for ext in index_exts]
+    work_dir = job.fileStore.getLocalTempDir()
+    job.fileStore.readGlobalFile(config['bwa_index_dir'],
+                                 os.path.join(work_dir, 'bwa_index_dir'))
+
+    for index_file in index_files:
+        file_id = job.fileStore.writeGlobalFile(
+            os.path.join('bwa_index_dir', index_file))
+        setattr(bwa_config, index_file, file_id)
+
+
 
 
 def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
@@ -25,7 +48,7 @@ def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
 
     :param job: Toil Job instance
     :param uuid str: Unique identifier for the sample
-    :param url str: URL to sample bam
+    :param url str: URL to sample bam or fq file
     :param config dict: Configuration options for pipeline
     """
     config = deepcopy(config)
@@ -36,13 +59,18 @@ def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
     if config ['xmx'] is None:
         config['xmx'] = '{}G'.format(os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024 ** 3))
 
-    if config['run_bwa']:
-        pass
+    if config['run_bwa'] and config['bwa_index_dir'] and config['bwa_index_name']:
+        get_bam = job.wrapJobFn(setup_and_run_bwa_kit, url, config)
+
+    elif config['run_bwa'] or config['bwa_index_dir'] or config['bwa_index_name']:
+        raise ValueError('Sample {} does not have necessary bwa reference data'.format(uuid))
+
     else:
         get_bam = job.wrapJobFn(download_url_job, url, name='toil.bam', s3_key_path=config['ssec'])
 
     if bai_url:
-        get_bai = job.wrapJobFn(download_url_job, bai_url, name='toil.bam.bai', s3_key_path=config['ssec'])
+        get_bai = job.wrapJobFn(download_url_job, bai_url, name='toil.bam.bai',
+                                s3_key_path=config['ssec'])
     else:
         get_bai = job.wrapJobFn(samtools_index, get_bam.rv(), config)
 
@@ -51,7 +79,7 @@ def gatk_germline_pipeline(job, uuid, url, config, bai_url=None):
     
     if config['preprocess']:
         job.fileStore.logToMaster('Preprocessing sample: {}'.format(uuid))
-        preprocess = job.wrapJobFn(run_gatk_preprocessing, cores, get_bam.rv(), get_bai.rv(),
+        preprocess = job.wrapJobFn(run_germline_preprocessing, cores, get_bam.rv(), get_bai.rv(),
                                    config['genome.fa'], config['genome.dict'],
                                    config['genome.fa.fai'], config['phase.vcf'],
                                    config['mills.vcf'], config['dbsnp.vcf'], config['output_dir'],
@@ -118,8 +146,14 @@ def download_shared_files(job, config):
     """
     job.fileStore.logToMaster('Downloading shared reference files')
     reference_names = ['genome.fa', 'phase.vcf', 'mills.vcf', 'dbsnp.vcf', 'hapmap.vcf', 'omni.vcf']
+    if config['bwa_index_url']:
+        reference_names.extend('bwa_index_url')
     for name in reference_names:
         key, _ = name.split('.')
+        if name == 'bwa_index_url':
+            name = 'bwa_index'
+        if config[key].endswith('.tar.gz'):
+            name = name + '.tar.gz'
         config[name] = job.addChildJobFn(download_url_job, config[key], name=name,
                                          s3_key_path=config['ssec']).rv()
     return config
@@ -210,8 +244,7 @@ def gatk_haplotype_caller(job, bam_id, bai_id, config):
                 parameters = command,
                 tool = 'quay.io/ucsc_cgl/gatk:3.5--dba6dae49156168a909c43330350c6161dc7ecc2',
                 inputs=inputs.keys(),
-                outputs=outputs,
-                mock=config['mock_mode'])
+                outputs=outputs, mock=config['mock_mode'])
 
     return job.fileStore.writeGlobalFile(os.path.join(work_dir, 'toil.gvcf'))
 
@@ -475,6 +508,8 @@ def generate_config():
         omni:
         # Run BWA on fastqs
         run_bwa:
+        bwa_index_url:
+        bwa_index_name:
         # GATK Preprocessing
         preprocess:
         # Approximate input file size. Should be given as %d[TGMK], e.g.,

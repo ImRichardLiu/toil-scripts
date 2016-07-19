@@ -172,12 +172,10 @@ def picard_mark_duplicates(job, bam_id, bai_id, xmx='10G', mock=False):
     """
     Runs picardtools MarkDuplicates. Assumes the bam file is coordinate sorted.
 
-    :param job:
-    :param bam_id:
-    :param bai_id:
-    :param config:
-    :param xmx:
-    :return:
+    :param bam_id: bam file store ID
+    :param bai_id: bam.bai file store ID
+    :param xmx: memory allocation for _JAVA_OPTIONS
+    :return: mdup bam file store ID, mdup bam.bai file store ID
     """
     work_dir = job.fileStore.getLocalTempDir()
     outputs={'sample.mkdups.bam': None, 'sample.mkdups.bai': None}
@@ -235,28 +233,30 @@ def run_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, db
     return pr.rv(0), pr.rv(1)
 
 
-def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, dbsnp,
-                           output_dir, mem='10G', unsafe=False, mock=False):
+def run_germline_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mills, dbsnp,
+                               filename=None, output_dir=None, mem='10G', unsafe=False, mock=False):
     """
     Pre-processing steps for running the GATK Germline pipeline
 
-    :param cores:
-    :param bam:
-    :param bai:
-    :param ref:
-    :param ref_dict:
-    :param fai:
-    :param phase:
-    :param mills:
-    :param dbsnp:
-    :param mem:
-    :param unsafe:
-    :return:
+    :param JobFunctionWrappingJob job: passed automatically by Toil
+    :param int cores: Maximum number of cores on a worker node
+    :param str bam: Sample BAM FileStoreID
+    :param str bai: Bam Index FileStoreID
+    :param str ref: Reference genome FileStoreID
+    :param str ref_dict: Reference dictionary FileStoreID
+    :param str fai: Reference index FileStoreID
+    :param str phase: Phase VCF FileStoreID
+    :param str mills: Mills VCF FileStoreID
+    :param str dbsnp: DBSNP VCF FileStoreID
+    :param str mem: Memory value to be passed to children. Needed for CI tests
+    :param bool unsafe: If True, runs gatk UNSAFE mode: "-U ALLOW_SEQ_DICT_INCOMPATIBILITY"
+    :return: BAM and BAI FileStoreIDs from Print Reads
+    :rtype: tuple(str, str)
     """
     rm_secondary = job.wrapJobFn(samtools_view, bam, flag='0x800', mock=mock)
     picard_sort = job.wrapJobFn(picard_sort_sam, rm_secondary.rv(), xmx=mem, mock=mock)
     mdups = job.wrapJobFn(picard_mark_duplicates, picard_sort.rv(0), picard_sort.rv(1),
-                          xmx=mem, mock=mock)
+                          xmx='10G', mock=mock)
     realigner_target = job.wrapJobFn(run_realigner_target_creator, cores, mdups.rv(0), mdups.rv(1),
                                      ref, ref_dict, fai, phase, mills, mem, unsafe=unsafe,
                                      mock=mock)
@@ -275,6 +275,9 @@ def run_gatk_preprocessing(job, cores, bam, bai, ref, ref_dict, fai, phase, mill
     realigner_target.addChild(indel_realign)
     indel_realign.addChild(base_recal)
     base_recal.addChild(print_reads)
+    if output_dir and filename:
+        output_bqsr = job.wrapJobFn(upload_or_move_job, filename, print_reads.rv(0), output_dir)
+        print_reads.addChild(output_bqsr)
     return print_reads.rv(0), print_reads.rv(1)
 
 
